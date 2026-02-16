@@ -2,25 +2,25 @@ Revisions: 1                                                        Éric NICOL
 Latest: 2026-02-16                                              ccjmne@gmail.com
 
                           Foreign Keyboard Wayland HUD
-                          ============================
+                          ----------------------------
+                          Master a new keyboard layout
+                              without looking down
 
 
-Get familiar with a new keyboard layout without having to look down.
-
-Particularly practical when looking down would be of no help because your
-physical keyboard still shows the good old, reliable, comfortable labels on its
-keys—if any labels at all.
+Particularly practical when looking down would be of no help when your physical
+keyboard still shows the good old, reliable, comfortable labels on its keys--if
+any at all.
 
 Currently only displays 한글 characters with some muted QWERTY hints overlaid.
 
 
 Development --------------------------------------------------------------------
 
-    make run                                                  build and run once
-    fd '.*\.c' | entr -cr -- make run                 continuously build and run
+    make run                                             build and run once
+    fd '.*\.c' | entr -cr -- make run            continuously build and run
 
-    Requires gcc, make, pgk-config, all dependencies of base-devel: chances are
-    immense that you've got the tools suite already.
+    Requires gcc, make, pgk-config, all dependencies of base-devel: chances
+    are immense that you've got the tools suite already.
 
 
 Dependencies -------------------------------------------------------------------
@@ -34,9 +34,9 @@ Dependencies -------------------------------------------------------------------
         Google's Noto CJK fonts, for 한글 glyphs.
 
 
-Licensing ------------------------------------------------------------------------
+Licensing ----------------------------------------------------------------------
 
-MIT License, do essentially as you please; refer to LICENSE for details.
+    MIT license, do essentially as you please; refer to LICENSE for details.
 
 
-                                                      vim: set tw=80 sw=4 et sta
+                                          vim: set tw=80 sw=4 et sta cc=80,-4,5:
