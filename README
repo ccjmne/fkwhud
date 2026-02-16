@@ -1,0 +1,37 @@
+Revisions: 1                                                        Éric NICOLAS
+Latest: 2026-02-16                                              ccjmne@gmail.com
+
+                          Foreign Keyboard Wayland HUD
+                          ============================
+
+
+Get familiar with a new keyboard layout without having to look down.
+
+Particularly practical when looking down would be of no help because your
+physical keyboard still shows the good old, reliable, comfortable labels on its
+keys—if any labels at all.
+
+Currently only displays 한글 characters with some muted QWERTY hints overlaid.
+
+
+Development --------------------------------------------------------------------
+
+    make run                                                  build and run once
+    fd '.*\.c' | entr -cr -- make run                 continuously build and run
+
+    Requires gcc, make, pgk-config, all dependencies of base-devel: chances are
+    immense that you've got the tools suite already.
+
+
+Dependencies -------------------------------------------------------------------
+
+    - gtk4-layer-shell
+
+        In order to create panels and other desktop components for Wayland.
+
+    - noto-fonts-cjk
+
+        Google's Noto CJK fonts, for 한글 glyphs.
+
+
+                                                      vim: set tw=80 sw=4 et sta
