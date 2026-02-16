@@ -34,4 +34,9 @@ Dependencies -------------------------------------------------------------------
         Google's Noto CJK fonts, for 한글 glyphs.
 
 
+Licensing ------------------------------------------------------------------------
+
+MIT License, do essentially as you please; refer to LICENSE for details.
+
+
                                                       vim: set tw=80 sw=4 et sta
