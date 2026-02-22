@@ -33,22 +33,16 @@ Dependencies -------------------------------------------------------------------
       Google's Noto fonts, for its support of a great number of languages.
 
 
-Wishlist -----------------------------------------------------------------------
-
-  - In the HUD, drop GTK4, but don't use Qt either: go raw layer-shell,
-    from wayland-protocols (I think?) + cairo.  Do remember to udpate the
-    dependencies section afterwards.
-
-  - Currently (probably?) works on X11: am I certain to be okay with going
-    Wayland-only just to drop GTK4 and hand-roll the whole shebang?
-
-  - Highlight keypresses
+Wish list ----------------------------------------------------------------------
 
   - Reflect current effective layout in key labels
 
   - Make some things configurable (at least colours, font)
 
   - Better finalise production packaging, probably publish to the AUR
+
+  - Consider switching the whole thing to a Qt app.  It would maybe not even
+    require even need any client–server communication channel...
 
 Licensing ----------------------------------------------------------------------
 
