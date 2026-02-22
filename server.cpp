@@ -22,7 +22,8 @@
 namespace fcitx {
 
 FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
-  sockPath = (getenv("XDG_RUNTIME_DIR") ? std::string(getenv("XDG_RUNTIME_DIR")) : std::string("/tmp")) + "/fkwhud.sock";
+  auto runtime = getenv("XDG_RUNTIME_DIR");
+  sockPath = std::string(runtime ? runtime : "/tmp") + "/fkwhud.sock";
   unlink(sockPath.c_str());
   serverFD = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (serverFD < 0) {
@@ -43,11 +44,10 @@ FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
     return;
   }
 
+  // clang-format off
   fcitx5IO = fcitx5->watchEvent(EventType::InputContextKeyEvent, EventWatcherPhase::Default, [this](Event &event) { handleKeypress(event); });
-  serverIO = fcitx5->eventLoop().addIOEvent(serverFD, IOEventFlags{IOEventFlag::In}, [this](EventSource *, int, IOEventFlags) {
-    handleConnect();
-    return true;
-  });
+  serverIO = fcitx5->eventLoop().addIOEvent(serverFD, IOEventFlags{IOEventFlag::In}, [this](EventSource *, int, IOEventFlags) { handleConnect(); return true; });
+  // clang-format on
 
   FCITX_INFO() << "fkwhud addon initialized, socket at " << sockPath;
 }
@@ -86,6 +86,7 @@ void FkwhudAddon::handleConnect() {
   }
   FCITX_INFO() << "HUD connected";
 
+  // clang-format off
   clientIO = fcitx5->eventLoop().addIOEvent(clientFD, IOEventFlags{IOEventFlag::Err, IOEventFlag::Hup}, [this](EventSource *, int, IOEventFlags flags) {
     if (flags.test(IOEventFlag::Err) || flags.test(IOEventFlag::Hup)) {
       FCITX_INFO() << "HUD disconnected";
@@ -93,6 +94,7 @@ void FkwhudAddon::handleConnect() {
     }
     return true;
   });
+  // clang-format on
 }
 
 void FkwhudAddon::handleDisconnect() {
