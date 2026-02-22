@@ -20,10 +20,10 @@ public:
   ~FkwhudAddon();
 
 private:
-  void send(const void *data, size_t size);
-  void handleKeypress(Event &event);
   void handleConnect();
   void handleDisconnect();
+  void handleKeypress(Event &event);
+  void send(const void *data, size_t size);
 
   Instance *fcitx5;
 

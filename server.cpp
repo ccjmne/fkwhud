@@ -36,8 +36,8 @@ FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, sockPath.c_str(), sizeof(addr.sun_path) - 1);
 
-  if (bind(serverFD, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(serverFD, 1) < 0) {
-    FCITX_ERROR() << "Failed to bind or listen on socket: " << strerror(errno);
+  if (bind(serverFD, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(serverFD, 0) < 0) {
+    FCITX_ERROR() << "Failed binding to or listening on socket: " << strerror(errno);
     close(serverFD);
     serverFD = -1;
     unlink(sockPath.c_str());
@@ -56,40 +56,24 @@ FkwhudAddon::~FkwhudAddon() {
   fcitx5IO.reset();
   serverIO.reset();
   handleDisconnect();
-
-  if (serverFD >= 0) {
-    close(serverFD);
-    serverFD = -1;
-  }
-
-  if (!sockPath.empty()) {
-    unlink(sockPath.c_str());
-    sockPath.clear();
-  }
+  close(serverFD);
+  serverFD = -1;
+  unlink(sockPath.c_str());
+  sockPath.clear();
 }
 
 void FkwhudAddon::handleConnect() {
-  if (clientFD >= 0) {
-    auto fd = accept(serverFD, nullptr, nullptr);
-    if (fd >= 0) {
-      auto msg = "Another client is already connected.";
-      write(fd, msg, strlen(msg) + 1);
-      close(fd);
-    }
-    return;
-  }
-
   clientFD = accept4(serverFD, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
   if (clientFD < 0) {
     FCITX_ERROR() << "Failed to accept client: " << strerror(errno);
     return;
   }
-  FCITX_INFO() << "HUD connected";
+  FCITX_INFO() << "Client connected";
 
   // clang-format off
   clientIO = fcitx5->eventLoop().addIOEvent(clientFD, IOEventFlags{IOEventFlag::Err, IOEventFlag::Hup}, [this](EventSource *, int, IOEventFlags flags) {
     if (flags.test(IOEventFlag::Err) || flags.test(IOEventFlag::Hup)) {
-      FCITX_INFO() << "HUD disconnected";
+      FCITX_INFO() << "Client disconnected";
       handleDisconnect();
     }
     return true;
@@ -99,24 +83,8 @@ void FkwhudAddon::handleConnect() {
 
 void FkwhudAddon::handleDisconnect() {
   clientIO.reset();
-  if (clientFD >= 0) {
-    close(clientFD);
-    clientFD = -1;
-  }
-}
-
-void FkwhudAddon::send(const void *data, size_t size) {
-  if (clientFD < 0)
-    return;
-
-  if (write(clientFD, data, size) < 1) {
-    if (errno == EPIPE || errno == ECONNRESET) {
-      FCITX_INFO() << "HUD disconnected";
-      handleDisconnect();
-    } else {
-      FCITX_ERROR() << "write failed: " << strerror(errno);
-    }
-  }
+  close(clientFD);
+  clientFD = -1;
 }
 
 void FkwhudAddon::handleKeypress(Event &event) {
@@ -128,6 +96,16 @@ void FkwhudAddon::handleKeypress(Event &event) {
   send(&(pressed ? "P" : "R"), 1);
   send(&keysym, sizeof(keysym));
   send(&keycode, sizeof(keycode));
+}
+
+void FkwhudAddon::send(const void *data, size_t size) {
+  if (clientFD >= 0 && write(clientFD, data, size) < 1) {
+    if (errno == EPIPE || errno == ECONNRESET) {
+      FCITX_INFO() << "Client disconnected";
+      handleDisconnect();
+    } else
+      FCITX_ERROR() << "Write failed: " << strerror(errno);
+  }
 }
 
 } // namespace fcitx
