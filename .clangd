@@ -1,0 +1,18 @@
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+  Includes:
+    AnalyzeAngledIncludes: true
+
+  ClangTidy:
+    Add:
+      - misc-include-cleaner
+      - bugprone-suspicious-include
+      - readability-duplicate-include
+      - modernize-deprecated-headers
+      - misc-unused-alias-decls
+      - misc-unused-using-decls
+
+Index:
+  Background: Build

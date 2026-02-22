@@ -1,3 +1,14 @@
+#include "cairo.h"
+#include "gio/gio.h"
+#include "glib-object.h"
+#include "glib.h"
+#include "glibconfig.h"
+#include "gtk/gtk.h"
+#include "gtk/gtkshortcut.h"
+#include "pango/pango-font.h"
+#include "pango/pango-layout.h"
+#include "pango/pango-types.h"
+#include "pango/pangocairo.h"
 #include <gtk-layer-shell/gtk-layer-shell.h>
 
 static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
