@@ -1,11 +1,25 @@
+project(fkwhud C CXX)
 cmake_minimum_required(VERSION 3.10)
-project(fkwhud C)
-
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(DEPS REQUIRED gtk4 gtk4-layer-shell-0)
 
-add_executable(fkwhud fkwhud.c)
-target_include_directories(fkwhud PRIVATE ${DEPS_INCLUDE_DIRS})
-target_compile_options(fkwhud PRIVATE -Os -ffunction-sections -fdata-sections -flto)
-target_link_libraries(fkwhud ${DEPS_LIBRARIES})
-target_link_options(fkwhud PRIVATE -Wl,--as-needed -Wl,--gc-sections -flto)
+# Client (GTK4 HUD)
+pkg_check_modules(CLIENT_DEPS REQUIRED gtk4 gtk4-layer-shell-0)
+add_executable             (fkwhud-client client.c)
+target_include_directories (fkwhud-client PRIVATE ${CLIENT_DEPS_INCLUDE_DIRS})
+target_compile_options     (fkwhud-client PRIVATE -Os -ffunction-sections -fdata-sections -flto)
+target_link_libraries      (fkwhud-client ${CLIENT_DEPS_LIBRARIES})
+target_link_options        (fkwhud-client PRIVATE -Wl,--as-needed -Wl,--gc-sections -flto)
+set_target_properties      (fkwhud-client PROPERTIES OUTPUT_NAME "fkwhud")
+
+# Server (fcitx5 addon)
+pkg_check_modules(SERVER_DEPS REQUIRED Fcitx5Core)
+add_library                (fkwhud-server MODULE server.cpp)
+set_target_properties      (fkwhud-server PROPERTIES PREFIX "" OUTPUT_NAME "fkwhud")
+target_compile_features    (fkwhud-server PRIVATE cxx_std_20)
+target_include_directories (fkwhud-server PRIVATE ${SERVER_DEPS_INCLUDE_DIRS})
+target_link_libraries      (fkwhud-server ${SERVER_DEPS_LIBRARIES})
+
+# Install addon
+include(GNUInstallDirs)
+install(TARGETS fkwhud-server COMPONENT server DESTINATION "${CMAKE_INSTALL_LIBDIR}/fcitx5")
+install(FILES   fkwhud.conf   COMPONENT server DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
