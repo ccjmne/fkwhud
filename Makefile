@@ -1,18 +1,11 @@
-CC = gcc
-
-SRC = fkwhud.c
-TARGET = fkwhud
-
-PKG_CFLAGS = $(shell pkg-config --cflags gtk4 gtk4-layer-shell-0)
-PKG_LIBS   = $(shell pkg-config --libs   gtk4 gtk4-layer-shell-0)
-
-CFLAGS  = $(PKG_CFLAGS) -Os -ffunction-sections -fdata-sections -flto
-LDFLAGS = $(PKG_LIBS)   -Wl,--as-needed -Wl,--gc-sections -flto
+BUILD_DIR = build
+TARGET = $(BUILD_DIR)/fkwhud
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+$(TARGET): CMakeLists.txt fkwhud.c
+	cmake -B $(BUILD_DIR) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	cmake --build $(BUILD_DIR)
 
 run: $(TARGET)
 	./$(TARGET)
@@ -21,4 +14,6 @@ release: $(TARGET)
 	strip --strip-unneeded $(TARGET)
 
 clean:
-	rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
+
+.PHONY: all run release clean
