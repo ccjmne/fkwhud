@@ -23,23 +23,20 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, i
 
   for (int r = 0; r < n_rows; r++) {
     int n_keys = 0;
-    while (n_keys < 10 && hangul_rows[r][n_keys] != NULL) {
+    while (n_keys < 10 && hangul_rows[r][n_keys] != NULL)
       n_keys++;
-    }
 
-    double key_width = (double)width / n_keys;
+    int w = width - 2 * (n_keys - 1);
+    double key_width = (double)w / n_keys;
     double key_height = (double)height / n_rows;
 
     for (int i = 0; i < n_keys; i++) {
-      double x = i * key_width;
-      double y = r * key_height;
+      double x = i * (key_width + 2);
+      double y = r * (key_height + 2);
 
       cairo_set_source_rgb(cr, .3, .3, .3);
-      cairo_rectangle(cr, x + 2, y + 2, key_width - 4, key_height - 4);
+      cairo_rectangle(cr, x, y, key_width, key_height);
       cairo_fill(cr);
-
-      cairo_rectangle(cr, x + 2, y + 2, key_width - 4, key_height - 4);
-      cairo_stroke(cr);
 
       PangoLayout *layout = pango_cairo_create_layout(cr);
       PangoFontDescription *desc = pango_font_description_from_string("Noto Sans Bold");
