@@ -22,4 +22,4 @@ target_link_libraries      (fkwhud-server ${SERVER_DEPS_LIBRARIES})
 # Install addon
 include(GNUInstallDirs)
 install(TARGETS fkwhud-server COMPONENT server DESTINATION "${CMAKE_INSTALL_LIBDIR}/fcitx5")
-install(FILES   fkwhud.conf   COMPONENT server DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
+install(FILES   server.conf   COMPONENT server DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon" RENAME fkwhud.conf)
