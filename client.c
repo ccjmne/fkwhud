@@ -30,7 +30,6 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width,
       cairo_rectangle(cr, x + 2, y + 2, key_width - 4, key_height - 4);
       cairo_fill(cr);
 
-      cairo_set_source_rgb(cr, .0, .0, .0);
       cairo_rectangle(cr, x + 2, y + 2, key_width - 4, key_height - 4);
       cairo_stroke(cr);
 
