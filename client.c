@@ -21,9 +21,9 @@
 typedef struct {
   GtkWidget *drawing;
   GHashTable *keys; // Map<keycode, KeyInfo>
-  GIOChannel *socket;
   int socket_fd;
   guint socket_io;
+  guint reconnect_io;
 } State;
 
 typedef struct {
@@ -88,9 +88,6 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, i
 
   int n_rows = sizeof(hangul_rows) / sizeof(hangul_rows[0]);
 
-  // cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
-  // cairo_paint(cr);
-  //
   for (int r = 0; r < n_rows; r++) {
     int n_keys = 0;
     while (n_keys < 10 && hangul_rows[r][n_keys] != NULL)
@@ -147,12 +144,6 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, i
   }
 }
 
-static void draw_callback(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-  cairo_set_source_rgb(cr, .3, .3, .3);
-  cairo_rectangle(cr, 0, 0, width, height);
-  cairo_fill(cr);
-}
-
 static void app_activate(GtkApplication *app, gpointer user_data) {
   int height = 200;
   GtkWidget *window = gtk_application_window_new(app);
@@ -174,11 +165,14 @@ static void app_activate(GtkApplication *app, gpointer user_data) {
   gtk_window_present(GTK_WINDOW(window));
 }
 
-static gboolean receive(int sock, void *buf, size_t size, char *name) {
-  size_t r = read(sock, buf, size);
-  if (r != size)
-    g_printerr("Failed to read %s\n", name);
-  return r != sizeof(buf);
+static gboolean connect_to_fcitx5(State *state);
+
+static gboolean try_reconnect(gpointer user_data) {
+  if (connect_to_fcitx5(user_data)) {
+    ((State *)user_data)->reconnect_io = 0;
+    return FALSE;
+  }
+  return TRUE;
 }
 
 // returns whether to keep listening
@@ -186,21 +180,21 @@ static gboolean handleMessage(GIOChannel *channel, GIOCondition condition, gpoin
   State *state = (State *)user_data;
 
   if (condition & (G_IO_HUP | G_IO_ERR)) {
-    g_print("Socket disconnected\n");
+    if (!state->reconnect_io)
+      state->reconnect_io = g_timeout_add_seconds(2, try_reconnect, state);
     return FALSE;
   }
 
   if (condition & G_IO_IN) {
     char type;
     uint32_t keysym, keycode;
-    if (!receive(state->socket_fd, &type, 1, "type"))
+    gsize n;
+    if (g_io_channel_read_chars(channel, &type, 1, &n, NULL) != G_IO_STATUS_NORMAL ||
+        g_io_channel_read_chars(channel, (gchar *)&keysym, sizeof(keysym), &n, NULL) != G_IO_STATUS_NORMAL ||
+        g_io_channel_read_chars(channel, (gchar *)&keycode, sizeof(keycode), &n, NULL) != G_IO_STATUS_NORMAL)
       return FALSE;
 
     if (type == 'P' || type == 'R') {
-      if (!receive(state->socket_fd, &keysym, sizeof(keysym), "keysym") ||
-          !receive(state->socket_fd, &keycode, sizeof(keycode), "keycode"))
-        return FALSE;
-
       KeyInfo *key = g_hash_table_lookup(state->keys, GUINT_TO_POINTER(keycode));
       if (!key) {
         key = g_new(KeyInfo, 1);
@@ -209,9 +203,6 @@ static gboolean handleMessage(GIOChannel *channel, GIOCondition condition, gpoin
       }
       key->pressed = type == 'P';
       gtk_widget_queue_draw(state->drawing);
-    } else {
-      g_printerr("Unknown message type: 0x%02x\n", type);
-      return FALSE;
     }
   }
 
@@ -222,8 +213,7 @@ static gboolean connect_to_fcitx5(State *state) {
   const char *runtime_dir = g_getenv("XDG_RUNTIME_DIR");
   if (!runtime_dir)
     runtime_dir = "/tmp";
-  char socket_path[512];
-  snprintf(socket_path, sizeof(socket_path), "%s/fkwhud.sock", runtime_dir);
+  char *socket_path = g_build_filename(runtime_dir, "fkwhud.sock", NULL);
 
   state->socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (state->socket_fd < 0) {
@@ -237,30 +227,24 @@ static gboolean connect_to_fcitx5(State *state) {
   strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
   if (connect(state->socket_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    g_printerr("Failed to connect to fcitx5 addon at %s: %s\n", socket_path, strerror(errno));
-    g_printerr("Make sure the fcitx5-fkwhud addon is installed and fcitx5 is running.\n");
     close(state->socket_fd);
     state->socket_fd = -1;
     return FALSE;
   }
-  g_print("Connected to fcitx5 addon at %s\n", socket_path);
 
-  state->socket = g_io_channel_unix_new(state->socket_fd);
-  g_io_channel_set_encoding(state->socket, NULL, NULL);
-  g_io_channel_set_buffered(state->socket, FALSE);
-  state->socket_io = g_io_add_watch(state->socket, G_IO_IN | G_IO_HUP | G_IO_ERR, handleMessage, state);
+  GIOChannel *ch = g_io_channel_unix_new(state->socket_fd);
+  g_io_channel_set_encoding(ch, NULL, NULL);
+  state->socket_io = g_io_add_watch(ch, G_IO_IN | G_IO_HUP | G_IO_ERR, handleMessage, state);
+  g_io_channel_unref(ch);
   return TRUE;
 }
 
 int main(int argc, char **argv) {
-  State *state = g_new(State, 1);
-  state->socket = NULL;
+  State *state = g_new0(State, 1);
   state->socket_fd = -1;
-  state->socket_io = 0;
   state->keys = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
-  if (!connect_to_fcitx5(state)) {
-    g_printerr("Warning: Could not connect to fcitx5. Key events will not be received.\n");
-  }
+  if (!connect_to_fcitx5(state))
+    state->reconnect_io = g_timeout_add_seconds(2, try_reconnect, state);
 
   GtkApplication *app = gtk_application_new(NULL, G_APPLICATION_DEFAULT_FLAGS);
   g_signal_connect(app, "activate", G_CALLBACK(app_activate), state);
