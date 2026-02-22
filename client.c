@@ -31,8 +31,8 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, i
       cairo_stroke(cr);
 
       PangoLayout *layout = pango_cairo_create_layout(cr);
-      // TODO: Use a smarter way to get a reasonably decent size
-      PangoFontDescription *desc = pango_font_description_from_string("Noto Sans CJK KR Bold 24");
+      PangoFontDescription *desc = pango_font_description_from_string("Noto Sans Bold");
+      pango_font_description_set_size(desc, 24 * PANGO_SCALE);
 
       pango_layout_set_font_description(layout, desc);
       pango_layout_set_text(layout, hangul_rows[r][i], -1);
