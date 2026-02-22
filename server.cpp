@@ -1,121 +1,94 @@
 #include "server.h"
 
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
+#include <fcitx-utils/event.h>
+#include <fcitx-utils/eventloopinterface.h>
+#include <fcitx-utils/log.h>
+#include <fcitx/event.h>
+#include <fcitx/instance.h>
 
 #include <cerrno>
-#include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <string>
-
-#include "fcitx-utils/event.h"
-#include "fcitx-utils/eventloopinterface.h"
-#include "fcitx-utils/log.h"
-#include "fcitx/addoninstance.h"
-#include "fcitx/event.h"
-#include "fcitx/instance.h"
-
-// read: socat - $XDG_RUNTIME_DIR/fkwhud.sock
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace fcitx {
 
 FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
   auto runtime = getenv("XDG_RUNTIME_DIR");
-  sockPath = std::string(runtime ? runtime : "/tmp") + "/fkwhud.sock";
-  unlink(sockPath.c_str());
-  serverFD = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-  if (serverFD < 0) {
-    FCITX_ERROR() << "Failed to create socket: " << strerror(errno);
+  auto runtimeDir = std::string(runtime ? runtime : "/tmp");
+  dataFifoPath = runtimeDir + "/fkwhud-data.pipe";
+  ctrlFifoPath = runtimeDir + "/fkwhud-ctrl.pipe";
+
+  if (mkfifo(dataFifoPath.c_str(), 0666) < 0 && errno != EEXIST) {
+    FCITX_ERROR() << "Failed to create data pipe: " << strerror(errno);
+    return;
+  }
+  dataFifoFD = -1;
+
+  if (mkfifo(ctrlFifoPath.c_str(), 0666) < 0 && errno != EEXIST) {
+    FCITX_ERROR() << "Failed to create control pipe: " << strerror(errno);
+    return;
+  }
+  ctrlFifoFD = open(ctrlFifoPath.c_str(), O_RDONLY | O_NONBLOCK);
+  if (ctrlFifoFD < 0) {
+    FCITX_ERROR() << "Failed to open control pipe: " << strerror(errno);
     return;
   }
 
-  sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, sockPath.c_str(), sizeof(addr.sun_path) - 1);
-
-  if (bind(serverFD, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(serverFD, 1) < 0) {
-    FCITX_ERROR() << "Failed to bind or listen on socket: " << strerror(errno);
-    close(serverFD);
-    serverFD = -1;
-    unlink(sockPath.c_str());
-    return;
+  if (ctrlFifoFD >= 0) {
+    controlIO = fcitx5->eventLoop().addIOEvent(ctrlFifoFD, IOEventFlags{IOEventFlag::In},
+                                               [this](EventSource *, int, IOEventFlags) {
+                                                 handleControlMessage();
+                                                 return true;
+                                               });
   }
 
-  // clang-format off
-  fcitx5IO = fcitx5->watchEvent(EventType::InputContextKeyEvent, EventWatcherPhase::Default, [this](Event &event) { handleKeypress(event); });
-  serverIO = fcitx5->eventLoop().addIOEvent(serverFD, IOEventFlags{IOEventFlag::In}, [this](EventSource *, int, IOEventFlags) { handleConnect(); return true; });
-  // clang-format on
+  fcitx5IO = fcitx5->watchEvent(EventType::InputContextKeyEvent, EventWatcherPhase::Default,
+                                [this](Event &event) { handleKeypress(event); });
 
-  FCITX_INFO() << "fkwhud addon initialized, socket at " << sockPath;
+  FCITX_INFO() << "fkwhud addon initialized with dual FIFOs at " << runtimeDir;
 }
 
 FkwhudAddon::~FkwhudAddon() {
   fcitx5IO.reset();
-  serverIO.reset();
-  handleDisconnect();
+  controlIO.reset();
 
-  if (serverFD >= 0) {
-    close(serverFD);
-    serverFD = -1;
-  }
+  if (dataFifoFD >= 0)
+    close(dataFifoFD);
+  if (ctrlFifoFD >= 0)
+    close(ctrlFifoFD);
 
-  if (!sockPath.empty()) {
-    unlink(sockPath.c_str());
-    sockPath.clear();
-  }
+  unlink(dataFifoPath.c_str());
+  unlink(ctrlFifoPath.c_str());
 }
 
-void FkwhudAddon::handleConnect() {
-  if (clientFD >= 0) {
-    auto fd = accept(serverFD, nullptr, nullptr);
-    if (fd >= 0) {
-      auto msg = "Another client is already connected.";
-      write(fd, msg, strlen(msg) + 1);
-      close(fd);
+void FkwhudAddon::handleControlMessage() {
+  char msg;
+  if (read(ctrlFifoFD, &msg, 1) > 0) {
+    if (msg == 'H') {
+      clientAlive = true;
+      if (dataFifoFD < 0) {
+        dataFifoFD = open(dataFifoPath.c_str(), O_WRONLY | O_NONBLOCK);
+        if (dataFifoFD < 0)
+          FCITX_ERROR() << "Failed to open data pipe: " << strerror(errno);
+      }
+      FCITX_INFO() << "Client connected";
+    } else if (msg == 'G') {
+      clientAlive = false;
+      FCITX_INFO() << "Client disconnected";
     }
-    return;
-  }
-
-  clientFD = accept4(serverFD, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
-  if (clientFD < 0) {
-    FCITX_ERROR() << "Failed to accept client: " << strerror(errno);
-    return;
-  }
-  FCITX_INFO() << "HUD connected";
-
-  // clang-format off
-  clientIO = fcitx5->eventLoop().addIOEvent(clientFD, IOEventFlags{IOEventFlag::Err, IOEventFlag::Hup}, [this](EventSource *, int, IOEventFlags flags) {
-    if (flags.test(IOEventFlag::Err) || flags.test(IOEventFlag::Hup)) {
-      FCITX_INFO() << "HUD disconnected";
-      handleDisconnect();
-    }
-    return true;
-  });
-  // clang-format on
-}
-
-void FkwhudAddon::handleDisconnect() {
-  clientIO.reset();
-  if (clientFD >= 0) {
-    close(clientFD);
-    clientFD = -1;
   }
 }
 
 void FkwhudAddon::send(const void *data, size_t size) {
-  if (clientFD < 0)
+  if (!clientAlive || dataFifoFD < 0)
     return;
 
-  if (write(clientFD, data, size) < 1) {
-    if (errno == EPIPE || errno == ECONNRESET) {
-      FCITX_INFO() << "HUD disconnected";
-      handleDisconnect();
-    } else {
-      FCITX_ERROR() << "write failed: " << strerror(errno);
-    }
+  if (write(dataFifoFD, data, size) < 0 && errno == EPIPE) {
+    clientAlive = false;
+    FCITX_INFO() << "Client disconnected (broken pipe)";
   }
 }
 

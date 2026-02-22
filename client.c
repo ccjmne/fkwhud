@@ -10,21 +10,25 @@
 #include "pango/pango-types.h"
 #include "pango/pangocairo.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <gtk-layer-shell/gtk-layer-shell.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 typedef struct {
   GtkWidget *drawing;
   GHashTable *keys; // Map<keycode, KeyInfo>
-  GIOChannel *socket;
-  int socket_fd;
-  guint socket_io;
+  int data_fd;
+  int ctrl_fd;
+  GIOChannel *data_channel;
+  guint data_io;
 } State;
+
+static State *g_state = NULL;
 
 typedef struct {
   guint keycode;
@@ -88,9 +92,6 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, i
 
   int n_rows = sizeof(hangul_rows) / sizeof(hangul_rows[0]);
 
-  // cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
-  // cairo_paint(cr);
-  //
   for (int r = 0; r < n_rows; r++) {
     int n_keys = 0;
     while (n_keys < 10 && hangul_rows[r][n_keys] != NULL)
@@ -147,12 +148,6 @@ static void draw_hangul_keyboard(GtkDrawingArea *area, cairo_t *cr, int width, i
   }
 }
 
-static void draw_callback(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
-  cairo_set_source_rgb(cr, .3, .3, .3);
-  cairo_rectangle(cr, 0, 0, width, height);
-  cairo_fill(cr);
-}
-
 static void app_activate(GtkApplication *app, gpointer user_data) {
   int height = 200;
   GtkWidget *window = gtk_application_window_new(app);
@@ -176,9 +171,11 @@ static void app_activate(GtkApplication *app, gpointer user_data) {
 
 static gboolean receive(int sock, void *buf, size_t size, char *name) {
   size_t r = read(sock, buf, size);
-  if (r != size)
+  if (r != size) {
     g_printerr("Failed to read %s\n", name);
-  return r != sizeof(buf);
+    return FALSE;
+  }
+  return TRUE;
 }
 
 // returns whether to keep listening
@@ -186,28 +183,30 @@ static gboolean handleMessage(GIOChannel *channel, GIOCondition condition, gpoin
   State *state = (State *)user_data;
 
   if (condition & (G_IO_HUP | G_IO_ERR)) {
-    g_print("Socket disconnected\n");
+    g_print("Data pipe disconnected\n");
     return FALSE;
   }
 
   if (condition & G_IO_IN) {
     char type;
     uint32_t keysym, keycode;
-    if (!receive(state->socket_fd, &type, 1, "type"))
+    if (!receive(state->data_fd, &type, 1, "type"))
       return FALSE;
 
     if (type == 'P' || type == 'R') {
-      if (!receive(state->socket_fd, &keysym, sizeof(keysym), "keysym") ||
-          !receive(state->socket_fd, &keycode, sizeof(keycode), "keycode"))
+      if (!receive(state->data_fd, &keysym, sizeof(keysym), "keysym") ||
+          !receive(state->data_fd, &keycode, sizeof(keycode), "keycode"))
         return FALSE;
 
       KeyInfo *key = g_hash_table_lookup(state->keys, GUINT_TO_POINTER(keycode));
-      if (!key) {
+      if (key) {
+        key->pressed = type == 'P';
+      } else {
         key = g_new(KeyInfo, 1);
+        key->pressed = type == 'P';
         key->keycode = keycode;
         g_hash_table_insert(state->keys, GUINT_TO_POINTER(keycode), key);
       }
-      key->pressed = type == 'P';
       gtk_widget_queue_draw(state->drawing);
     } else {
       g_printerr("Unknown message type: 0x%02x\n", type);
@@ -222,42 +221,65 @@ static gboolean connect_to_fcitx5(State *state) {
   const char *runtime_dir = g_getenv("XDG_RUNTIME_DIR");
   if (!runtime_dir)
     runtime_dir = "/tmp";
-  char socket_path[512];
-  snprintf(socket_path, sizeof(socket_path), "%s/fkwhud.sock", runtime_dir);
 
-  state->socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (state->socket_fd < 0) {
-    g_printerr("Failed to create socket: %s\n", strerror(errno));
+  char data_fifo_path[512];
+  char ctrl_fifo_path[512];
+  snprintf(data_fifo_path, sizeof(data_fifo_path), "%s/fkwhud-data.pipe", runtime_dir);
+  snprintf(ctrl_fifo_path, sizeof(ctrl_fifo_path), "%s/fkwhud-ctrl.pipe", runtime_dir);
+
+  state->data_fd = open(data_fifo_path, O_RDONLY | O_NONBLOCK);
+  if (state->data_fd < 0) {
+    g_printerr("Failed to open data pipe at %s: %s\n", data_fifo_path, strerror(errno));
     return FALSE;
   }
 
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-
-  if (connect(state->socket_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    g_printerr("Failed to connect to fcitx5 addon at %s: %s\n", socket_path, strerror(errno));
-    g_printerr("Make sure the fcitx5-fkwhud addon is installed and fcitx5 is running.\n");
-    close(state->socket_fd);
-    state->socket_fd = -1;
+  state->ctrl_fd = open(ctrl_fifo_path, O_WRONLY | O_NONBLOCK);
+  if (state->ctrl_fd < 0) {
+    g_printerr("Failed to open control pipe at %s: %s\n", ctrl_fifo_path, strerror(errno));
+    close(state->data_fd);
+    state->data_fd = -1;
     return FALSE;
   }
-  g_print("Connected to fcitx5 addon at %s\n", socket_path);
 
-  state->socket = g_io_channel_unix_new(state->socket_fd);
-  g_io_channel_set_encoding(state->socket, NULL, NULL);
-  g_io_channel_set_buffered(state->socket, FALSE);
-  state->socket_io = g_io_add_watch(state->socket, G_IO_IN | G_IO_HUP | G_IO_ERR, handleMessage, state);
+  if (write(state->ctrl_fd, "H", 1) < 0)
+    g_printerr("Failed to send hello message: %s\n", strerror(errno));
+  else
+    g_print("Sent hello message to server\n");
+
+  state->data_channel = g_io_channel_unix_new(state->data_fd);
+  g_io_channel_set_encoding(state->data_channel, NULL, NULL);
+  g_io_channel_set_buffered(state->data_channel, FALSE);
+  state->data_io = g_io_add_watch(state->data_channel, G_IO_IN | G_IO_HUP | G_IO_ERR, handleMessage, state);
+
+  g_print("Connected to server\n");
   return TRUE;
+}
+
+static void signal_handler(int signum) {
+  g_print("\nReceived signal %d, cleaning up...\n", signum);
+  if (g_state && g_state->ctrl_fd >= 0) {
+    if (write(g_state->ctrl_fd, "G", 1) < 0)
+      g_printerr("Failed to send goodbye message: %s\n", strerror(errno));
+    else
+      g_print("Sent goodbye message to server\n");
+    close(g_state->ctrl_fd);
+  }
+  if (g_state && g_state->data_fd >= 0)
+    close(g_state->data_fd);
+  exit(0);
 }
 
 int main(int argc, char **argv) {
   State *state = g_new(State, 1);
-  state->socket = NULL;
-  state->socket_fd = -1;
-  state->socket_io = 0;
+  state->data_fd = -1;
+  state->ctrl_fd = -1;
+  state->data_channel = NULL;
+  state->data_io = 0;
   state->keys = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
+  g_state = state;
+
+  signal(SIGINT, signal_handler);  // Ctrl-C
+  signal(SIGTERM, signal_handler); // kill command
   if (!connect_to_fcitx5(state)) {
     g_printerr("Warning: Could not connect to fcitx5. Key events will not be received.\n");
   }

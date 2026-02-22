@@ -1,5 +1,5 @@
-project(fkwhud C CXX)
 cmake_minimum_required(VERSION 3.10)
+project(fkwhud C CXX)
 find_package(PkgConfig REQUIRED)
 
 # Client (GTK4 HUD)
