@@ -37,9 +37,7 @@ private:
 
 class FkwhudAddonFactory : public AddonFactory {
 public:
-  AddonInstance *create(AddonManager *manager) override {
-    return new FkwhudAddon(manager->instance());
-  }
+  AddonInstance *create(AddonManager *manager) override { return new FkwhudAddon(manager->instance()); }
 };
 
 } // namespace fcitx

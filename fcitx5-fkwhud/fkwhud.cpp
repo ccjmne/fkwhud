@@ -1,27 +1,28 @@
 #include "fkwhud.h"
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
 #include "fcitx-utils/event.h"
 #include "fcitx-utils/eventloopinterface.h"
 #include "fcitx-utils/log.h"
 #include "fcitx/addoninstance.h"
 #include "fcitx/event.h"
 #include "fcitx/instance.h"
-#include <cerrno>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 // read: socat - $XDG_RUNTIME_DIR/fkwhud.sock
 
 namespace fcitx {
 
 FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
-  sockPath = (getenv("XDG_RUNTIME_DIR") ? std::string(getenv("XDG_RUNTIME_DIR"))
-                                        : std::string("/tmp")) +
-             "/fkwhud.sock";
+  sockPath = (getenv("XDG_RUNTIME_DIR") ? std::string(getenv("XDG_RUNTIME_DIR")) : std::string("/tmp")) + "/fkwhud.sock";
   unlink(sockPath.c_str());
   serverFD = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (serverFD < 0) {
@@ -34,8 +35,7 @@ FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, sockPath.c_str(), sizeof(addr.sun_path) - 1);
 
-  if (bind(serverFD, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
-      listen(serverFD, 1) < 0) {
+  if (bind(serverFD, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(serverFD, 1) < 0) {
     FCITX_ERROR() << "Failed to bind or listen on socket: " << strerror(errno);
     close(serverFD);
     serverFD = -1;
@@ -43,15 +43,11 @@ FkwhudAddon::FkwhudAddon(Instance *instance) : fcitx5(instance) {
     return;
   }
 
-  serverIO =
-      fcitx5->eventLoop().addIOEvent(serverFD, IOEventFlags{IOEventFlag::In},
-                                     [this](EventSource *, int, IOEventFlags) {
-                                       handleConnect();
-                                       return true;
-                                     });
-  fcitx5IO = fcitx5->watchEvent(
-      EventType::InputContextKeyEvent, EventWatcherPhase::Default,
-      [this](Event &event) { handleKeypress(event); });
+  fcitx5IO = fcitx5->watchEvent(EventType::InputContextKeyEvent, EventWatcherPhase::Default, [this](Event &event) { handleKeypress(event); });
+  serverIO = fcitx5->eventLoop().addIOEvent(serverFD, IOEventFlags{IOEventFlag::In}, [this](EventSource *, int, IOEventFlags) {
+    handleConnect();
+    return true;
+  });
 
   FCITX_INFO() << "fkwhud addon initialized, socket at " << sockPath;
 }
@@ -90,15 +86,13 @@ void FkwhudAddon::handleConnect() {
   }
   FCITX_INFO() << "HUD connected";
 
-  clientIO = fcitx5->eventLoop().addIOEvent(
-      clientFD, IOEventFlags{IOEventFlag::Err, IOEventFlag::Hup},
-      [this](EventSource *, int, IOEventFlags flags) {
-        if (flags.test(IOEventFlag::Err) || flags.test(IOEventFlag::Hup)) {
-          FCITX_INFO() << "HUD disconnected";
-          handleDisconnect();
-        }
-        return true;
-      });
+  clientIO = fcitx5->eventLoop().addIOEvent(clientFD, IOEventFlags{IOEventFlag::Err, IOEventFlag::Hup}, [this](EventSource *, int, IOEventFlags flags) {
+    if (flags.test(IOEventFlag::Err) || flags.test(IOEventFlag::Hup)) {
+      FCITX_INFO() << "HUD disconnected";
+      handleDisconnect();
+    }
+    return true;
+  });
 }
 
 void FkwhudAddon::handleDisconnect() {
