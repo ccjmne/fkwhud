@@ -24,6 +24,7 @@ typedef struct {
   int socket_fd;
   guint socket_io;
   guint reconnect_io;
+  guint release_all_timer_id;
 } State;
 
 typedef struct {
@@ -175,11 +176,24 @@ static gboolean try_reconnect(gpointer user_data) {
   return TRUE;
 }
 
+static void release_all_keys_iter(gpointer k, gpointer v, gpointer d) { ((KeyInfo *)v)->pressed = 0; }
+static gboolean release_all_keys_timeout(gpointer user_data) {
+  State *state = (State *)user_data;
+  g_hash_table_foreach(state->keys, release_all_keys_iter, NULL);
+  gtk_widget_queue_draw(state->drawing);
+  state->release_all_timer_id = 0;
+  return FALSE;
+}
+
 // returns whether to keep listening
 static gboolean handleMessage(GIOChannel *channel, GIOCondition condition, gpointer user_data) {
   State *state = (State *)user_data;
 
   if (condition & (G_IO_HUP | G_IO_ERR)) {
+    if (state->release_all_timer_id > 0) {
+      g_source_remove(state->release_all_timer_id);
+      state->release_all_timer_id = 0;
+    }
     if (!state->reconnect_io)
       state->reconnect_io = g_timeout_add_seconds(2, try_reconnect, state);
     return FALSE;
@@ -202,6 +216,14 @@ static gboolean handleMessage(GIOChannel *channel, GIOCondition condition, gpoin
         g_hash_table_insert(state->keys, GUINT_TO_POINTER(keycode), key);
       }
       key->pressed = type == 'P';
+
+      if (type == 'P') {
+        if (state->release_all_timer_id != 0) {
+          g_source_remove(state->release_all_timer_id);
+        }
+        state->release_all_timer_id = g_timeout_add(750, release_all_keys_timeout, state);
+      }
+
       gtk_widget_queue_draw(state->drawing);
     }
   }

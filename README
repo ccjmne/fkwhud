@@ -1,5 +1,5 @@
-Revisions: 2                                                        Éric NICOLAS
-Latest: 2026-02-22                                              ccjmne@gmail.com
+Revisions: 3                                                        Éric NICOLAS
+Latest: 2026-03-17                                              ccjmne@gmail.com
 
                           Foreign Keyboard Wayland HUD
                           ----------------------------
@@ -44,9 +44,29 @@ Wish list ----------------------------------------------------------------------
   - Consider switching the whole thing to a Qt app.  It would maybe not even
     require even need any client–server communication channel...
 
+Behavioural details ------------------------------------------------------------
+
+    01. No Jamming .........................................................
+
+    Inherent to the way Input Methods are wired within the stricter Wayland
+    ecosystem, some key releases are bound to never reach fkwhud.  This
+    happens when text entry is being accepted and a key is pressed down *as
+    input mode is disabled*.  Most typically, this occurs whenever using
+    some key binding to quit an application.
+
+    For illustration, imagine being focused on some element in a Web browser
+    that you may type in: at that time, fcitx5 will receive key presses and
+    forward them to fkwhud.  Were you to press Ctrl-W to close the current
+    tab, the last signal sent through to fcitx5 would be "W pressed down"
+    while Ctrl is being held: we'd never see Ctrl nor W being released.
+
+    To remedy these "jammed" keys, after some 750ms debounce period without
+    having received any pressed signal, all the keys last seen being
+    "pressed" will be considered having been released.
+
 Licensing ----------------------------------------------------------------------
 
     MIT license, do essentially as you please; refer to LICENSE for details.
 
 
-                                          vim: set tw=80 sw=4 et sta cc=80,-4,5:
+                                        vim: set tw=80 sw=4 et sta cc=1,80,-4,5:
